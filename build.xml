@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="Carrefour" default="build">
+
+    <property file="build.properties"/>
+    <property file="build.properties.local"/>
+
+    <tstamp>
+        <format property="build.time" pattern="%Y%m%d_%H%M"/>
+    </tstamp>
+
+    <property name="build.name" value="v${master.version}_${build.time}" />
+    <property name="build.branch" value="${master.version}" />
+
+    <property name="deploy.release.basedir" value="${deploy.path}/releases"/>
+    <property name="deploy.release.dir" value="${deploy.release.basedir}/${build.name}"/>
+
+
+    <!-- ============================================  -->
+    <!-- Target: prepare                                 -->
+    <!-- ============================================  -->
+    <target name="prepare">
+        <echo>--------------------------------</echo>
+        <echo msg="Deleting old build and deploy dirs"/>
+        <echo>--------------------------------</echo>
+        <delete dir="./build/" includeemptydirs="true" failonerror="true" quiet="true"/>
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: create                                -->
+    <!-- ============================================  -->
+    <target name="create" depends="prepare">
+        <echo>--------------------------------</echo>
+        <echo msg="Creating fresh build and deploy directories"/>
+        <echo>--------------------------------</echo>
+        <mkdir dir="./build/"/>
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: gitcheckout                           -->
+    <!-- ============================================  -->
+    <target name="gitcheckout" depends="create">
+        <echo>--------------------------------</echo>
+        <echo msg="Checking out branch/tag ${build.branch}"/>
+        <echo>--------------------------------</echo>
+        <exec command="git fetch --all" />
+        <exec command="git archive ${build.branch} -o ./build/v${master.version}.tar" />
+
+        <echo msg="Extracting v${master.version}.tar"/>
+        <exec command="cd ./build/; mkdir v${master.version}; tar -xf v${master.version}.tar -C ./v${master.version}" />
+    </target>
+
+
+    <!-- ============================================  -->
+    <!-- Target: compassCompile                        -->
+    <!-- ============================================  -->
+    <target name="compassCompile">
+        <echo>--------------------------------</echo>
+        <echo> Compiling CSS</echo>
+        <echo>--------------------------------</echo>
+        <exec command="cd ./build/v${master.version}/source; compass compile --force" />
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: cssMinifySingle                        -->
+    <!-- ============================================  -->
+    <target name="cssMinifySingle">
+        <echo msg="Minifying css file: ${absfilename}" />
+
+        <exec command="java -jar ./bin/tools/yuicompressor-2.4.8.jar ${absfilename} -o ${absfilename}" />
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: cssMinify                        -->
+    <!-- ============================================  -->
+    <target name="cssMinify">
+        <echo>--------------------------------</echo>
+        <echo> Minify CSS to release</echo>
+
+        <foreach param="filename" absparam="absfilename" target="cssMinifySingle">
+            <fileset dir="./build/v${master.version}/source/skin/frontend/">
+                <include name="base/**/*.css"/>
+                <include name="rwd/**/*.css"/>
+                <include name="carrefour/**/*.css"/>
+            </fileset>
+        </foreach>
+
+        <echo>--------------------------------</echo>
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: jsMinifySingle                        -->
+    <!-- ============================================  -->
+    <target name="jsMinifySingle">
+        <echo msg="Minifying javacsript file: ${absfilename}" />
+
+        <exec command="java -jar ./bin/tools/yuicompressor-2.4.8.jar ${absfilename} -o ${absfilename} --preserve-semi" />
+    </target>
+
+
+    <!-- ============================================  -->
+    <!-- Target: jsMinify                        -->
+    <!-- ============================================  -->
+    <target name="jsMinify">
+        <echo>--------------------------------</echo>
+        <echo> Minify javascript to release</echo>
+
+        <foreach param="filename" absparam="absfilename" target="jsMinifySingle">
+            <fileset dir="./build/v${master.version}/source/js/carrefour/">
+                <include name="*.js"/>
+            </fileset>
+            <fileset dir="./build/v${master.version}/source/js/prototype/">
+                <include name="*.js"/>
+            </fileset>
+            <fileset dir="./build/v${master.version}/source/js/varien/">
+                <include name="*.js"/>
+            </fileset>
+            <fileset dir="./build/v${master.version}/source/skin/frontend/carrefour/default/js">
+                <include name="*.js"/>
+            </fileset>
+        </foreach>
+
+        <echo>--------------------------------</echo>
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: package                               -->
+    <!-- ============================================  -->
+    <target name="package">
+        <echo>--------------------------------</echo>
+        <echo msg="Packaging build"/>
+        <echo>--------------------------------</echo>
+
+        <exec command="cd ./build/; rm -rf v${master.version}.tgz; cd v${master.version}; tar -zcf ../v${master.version}.tgz ." />
+        <delete dir="./build/v${master.version}" includeemptydirs="true" failonerror="true" quiet="true"/>
+    </target>
+
+
+    <!-- ============================================  -->
+    <!-- Target: build                                 -->
+    <!-- ============================================  -->
+    <target name="build" depends="gitcheckout, create, prepare">
+        <echo>--------------------------------</echo>
+        <echo msg="Starting build ${build.name}"/>
+        <echo>--------------------------------</echo>
+
+        <phingcall target="compassCompile"/>
+        <!-- <phingcall target="cssMinify"/> -->
+        <phingcall target="jsMinify"/>
+        <phingcall target="package"/>
+    </target>
+
+
+    <!-- ============================================  -->
+    <!-- Target: deployToHost                            -->
+    <!-- ============================================  -->
+    <target name="deployToHost" if="ip">
+        <echo>--------------------------------</echo>
+        <echo msg="Deploying to host ${ip}" level="info"/>
+        <echo msg="Uploading file..." level="info"/>
+        <echo>--------------------------------</echo>
+
+        <scp username="${deploy.host.user}" password="${deploy.host.password}"
+             host="${ip}"
+             todir="${deploy.path}/releases"
+             file="./build/v${master.version}.tgz"/>
+        <ssh command="mkdir ${deploy.release.dir};
+                tar -zxf ${deploy.release.basedir}/v${master.version}.tgz -C ${deploy.release.dir};
+                rm -f ${deploy.release.basedir}/v${master.version}.tgz;
+                chmod +x ${deploy.release.dir}/${deploy.script};
+                ${deploy.release.dir}/${deploy.script} ${build.name} ${deploy.path}"
+             host="${ip}"
+             username="${deploy.host.user}"
+             password="${deploy.host.password}"
+             display="true"
+                />
+    </target>
+
+    <!-- ============================================  -->
+    <!-- Target: deploy                              -->
+    <!-- ============================================  -->
+    <target name="deploy">
+        <echo>--------------------------------</echo>
+        <echo msg="Deploying version ${master.version}"/>
+        <echo>--------------------------------</echo>
+
+        <foreach list="${deploy.host.ip}" param="ip" target="deployToHost" delimiter="|"/>
+    </target>
+</project>

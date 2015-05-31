@@ -1,0 +1,5 @@
+deploy.host.ip = 33.33.33.21
+deploy.host.user = vagrant
+deploy.host.password = vagrant
+
+deploy.path = /var/www
